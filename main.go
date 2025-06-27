@@ -16,9 +16,9 @@ func main() {
 		Handler: &mux,
 	}
 
-	mux.HandleFunc("GET /healthz", healthz)
-	mux.HandleFunc("GET /metrics", apiCfg.metrics)
-	mux.HandleFunc("POST /reset", apiCfg.reset)
+	mux.HandleFunc("GET /api/healthz", healthz)
+	mux.HandleFunc("GET /admin/metrics", apiCfg.metrics)
+	mux.HandleFunc("POST /admin/reset", apiCfg.reset)
 
 	log.Fatal(srv.ListenAndServe())
 
@@ -32,8 +32,8 @@ func healthz(writer http.ResponseWriter, request *http.Request) {
 }
 
 func (cfg *apiConfig) metrics(writer http.ResponseWriter, request *http.Request) {
-	printValue := []byte(fmt.Sprintf("Hits: %d", cfg.fileserverHits.Load()))
-	writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
+	printValue := []byte(fmt.Sprintf("<html><body><h1>Welcome, Chirpy Admin</h1><p>Chirpy has been visited %d times!</p></body></html>", cfg.fileserverHits.Load()))
+	writer.Header().Set("Content-Type", "text/html; charset=utf-8")
 	writer.WriteHeader(200)
 	writer.Write(printValue)
 }
