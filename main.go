@@ -16,9 +16,9 @@ func main() {
 		Handler: &mux,
 	}
 
-	mux.HandleFunc("/healthz", healthz)
-	mux.HandleFunc("/metrics", apiCfg.metrics)
-	mux.HandleFunc("/reset", apiCfg.reset)
+	mux.HandleFunc("GET /healthz", healthz)
+	mux.HandleFunc("GET /metrics", apiCfg.metrics)
+	mux.HandleFunc("POST /reset", apiCfg.reset)
 
 	log.Fatal(srv.ListenAndServe())
 
