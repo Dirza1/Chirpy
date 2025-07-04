@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"slices"
+	"strings"
 	"sync/atomic"
 )
 
@@ -39,7 +41,7 @@ func validate_chirp(writer http.ResponseWriter, request *http.Request) {
 	}
 
 	type returnValsTrue struct {
-		Valid bool `json:"valid"`
+		NewChirp string `json:"cleaned_body"`
 	}
 
 	decoder := json.NewDecoder(request.Body)
@@ -47,14 +49,16 @@ func validate_chirp(writer http.ResponseWriter, request *http.Request) {
 	err := decoder.Decode(&params)
 	if err != nil {
 		respondWithError(writer, 500, "Somthing went wrong")
+		return
 	}
 
 	if len(params.Chirp) > 140 {
 		respondWithError(writer, 400, "Chirp is too long")
+		return
 	}
-
+	cleanedChirp := checkForProfanity(params.Chirp)
 	respBody := returnValsTrue{
-		Valid: true,
+		NewChirp: cleanedChirp,
 	}
 	respondWithJSON(writer, 200, respBody)
 }
@@ -110,4 +114,26 @@ func respondWithJSON(w http.ResponseWriter, code int, payload interface{}) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 	w.Write(dat)
+}
+
+func checkForProfanity(chrirp string) string {
+	profaneSlice := []string{"kerfuffle", "sharbert", "fornax"}
+	lowerdString := strings.ToLower(chrirp)
+	splitString := strings.Split(lowerdString, " ")
+	for i, word := range splitString {
+		if slices.Contains(profaneSlice, word) {
+			splitString[i] = "****"
+		}
+	}
+	originalSplit := strings.Split(chrirp, " ")
+
+	for i, word := range splitString {
+		if word != "****" {
+			splitString[i] = originalSplit[i]
+		}
+	}
+
+	cleanedChirp := strings.Join(splitString, " ")
+
+	return cleanedChirp
 }
