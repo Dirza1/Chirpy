@@ -10,8 +10,10 @@ import (
 	"slices"
 	"strings"
 	"sync/atomic"
+	"time"
 
 	"github.com/Dirza1/Chirpy/internal/database"
+	"github.com/google/uuid"
 	"github.com/joho/godotenv"
 	_ "github.com/lib/pq"
 )
@@ -19,6 +21,7 @@ import (
 func main() {
 	godotenv.Load(".env")
 	dbURL := os.Getenv("DB_URL")
+	platform := os.Getenv("PLATFORM")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Println("error opening database")
@@ -27,6 +30,7 @@ func main() {
 
 	apiCfg := apiConfig{}
 	apiCfg.Queries = database.New(db)
+	apiCfg.PLATFORM = platform
 	mux := http.ServeMux{}
 	mux.Handle("/app/", http.StripPrefix("/app", apiCfg.middlewareMetricsInc(http.FileServer(http.Dir(".")))))
 	srv := &http.Server{
@@ -38,6 +42,7 @@ func main() {
 	mux.HandleFunc("GET /admin/metrics", apiCfg.metrics)
 	mux.HandleFunc("POST /admin/reset", apiCfg.reset)
 	mux.HandleFunc("POST /api/validate_chirp", validate_chirp)
+	mux.HandleFunc("POST /api/users", apiCfg.add_user)
 
 	log.Fatal(srv.ListenAndServe())
 
@@ -86,9 +91,18 @@ func (cfg *apiConfig) metrics(writer http.ResponseWriter, request *http.Request)
 }
 
 func (cfg *apiConfig) reset(writer http.ResponseWriter, request *http.Request) {
+	if cfg.PLATFORM != "dev" {
+		respondWithError(writer, 403, "Forbidden")
+		return
+	}
+	err := cfg.Queries.ResetDatabase(request.Context())
+	if err != nil {
+		respondWithError(writer, 400, "Issue during database reset")
+		return
+	}
 	cfg.fileserverHits.Swap(0)
 	writer.WriteHeader(200)
-	writer.Write([]byte("Hits reset to 0"))
+	writer.Write([]byte("Hits reset to 0 and database reset"))
 }
 
 func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
@@ -98,10 +112,44 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 	})
 
 }
+func (cfg *apiConfig) add_user(writer http.ResponseWriter, request *http.Request) {
+	type incomming struct {
+		Email string `json:"email"`
+	}
+	type User struct {
+		ID        uuid.UUID `json:"id"`
+		CreatedAt time.Time `json:"created_at"`
+		UpdatedAt time.Time `json:"updated_at"`
+		Email     string    `json:"email"`
+	}
+
+	decoder := json.NewDecoder(request.Body)
+	inc := incomming{}
+	err := decoder.Decode(&inc)
+	if err != nil {
+		respondWithError(writer, 500, "Somthing went wrong")
+		return
+	}
+
+	DBuser, err := cfg.Queries.CreateUser(request.Context(), inc.Email)
+	if err != nil {
+		respondWithError(writer, 400, "something went wrong with creation of user")
+		return
+	}
+	user := User{
+		ID:        DBuser.ID,
+		CreatedAt: DBuser.CreatedAt,
+		UpdatedAt: DBuser.UpdatedAt,
+		Email:     DBuser.Email,
+	}
+	respondWithJSON(writer, 201, user)
+
+}
 
 type apiConfig struct {
 	fileserverHits atomic.Int32
 	Queries        *database.Queries
+	PLATFORM       string
 }
 
 func respondWithError(w http.ResponseWriter, code int, msg string) {
