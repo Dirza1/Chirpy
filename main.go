@@ -3,6 +3,7 @@ package main
 import (
 	"database/sql"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"log"
 	"net/http"
@@ -41,7 +42,7 @@ func main() {
 	mux.HandleFunc("GET /api/healthz", healthz)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.metrics)
 	mux.HandleFunc("POST /admin/reset", apiCfg.reset)
-	mux.HandleFunc("POST /api/validate_chirp", validate_chirp)
+	mux.HandleFunc("POST /api/chirps", chirps)
 	mux.HandleFunc("POST /api/users", apiCfg.add_user)
 
 	log.Fatal(srv.ListenAndServe())
@@ -55,32 +56,40 @@ func healthz(writer http.ResponseWriter, request *http.Request) {
 	writer.Write(text)
 }
 
-func validate_chirp(writer http.ResponseWriter, request *http.Request) {
+func chirps(writer http.ResponseWriter, request *http.Request) {
 	type parameters struct {
 		Chirp string `json:"body"`
-	}
-
-	type returnValsTrue struct {
-		NewChirp string `json:"cleaned_body"`
+		ID    string `json:"user_id"`
 	}
 
 	decoder := json.NewDecoder(request.Body)
 	params := parameters{}
 	err := decoder.Decode(&params)
 	if err != nil {
-		respondWithError(writer, 500, "Somthing went wrong")
-		return
-	}
+		respondWithError(writer, 400, "something went wrong")
 
-	if len(params.Chirp) > 140 {
-		respondWithError(writer, 400, "Chirp is too long")
-		return
 	}
-	cleanedChirp := checkForProfanity(params.Chirp)
+	validated_Chirp, err := validate_chirp(params.Chirp)
+	if err != nil {
+		respondWithError(writer, 400, "something went wrong")
+
+	}
+	fmt.Println(validated_Chirp)
+
+}
+
+func validate_chirp(chirp string) (string, error) {
+	type returnValsTrue struct {
+		NewChirp string `json:"cleaned_body"`
+	}
+	if len(chirp) > 140 {
+		return "", errors.New("chirp to long")
+	}
+	cleanedChirp := checkForProfanity(chirp)
 	respBody := returnValsTrue{
 		NewChirp: cleanedChirp,
 	}
-	respondWithJSON(writer, 200, respBody)
+	return respBody.NewChirp, nil
 }
 
 func (cfg *apiConfig) metrics(writer http.ResponseWriter, request *http.Request) {
