@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"database/sql"
 	"encoding/json"
 	"errors"
@@ -41,8 +42,9 @@ func main() {
 
 	mux.HandleFunc("GET /api/healthz", healthz)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.metrics)
+	mux.HandleFunc("GET /api/chirps", apiCfg.get_chirps)
 	mux.HandleFunc("POST /admin/reset", apiCfg.reset)
-	mux.HandleFunc("POST /api/chirps", chirps)
+	mux.HandleFunc("POST /api/chirps", apiCfg.chirps)
 	mux.HandleFunc("POST /api/users", apiCfg.add_user)
 
 	log.Fatal(srv.ListenAndServe())
@@ -56,10 +58,36 @@ func healthz(writer http.ResponseWriter, request *http.Request) {
 	writer.Write(text)
 }
 
-func chirps(writer http.ResponseWriter, request *http.Request) {
+func (cfg *apiConfig) get_chirps(writer http.ResponseWriter, request *http.Request) {
+	chirps, err := cfg.Queries.GetAllChirps(context.Background())
+	if err != nil {
+		respondWithError(writer, 400, "something went wrong")
+	}
+	type returnjason struct {
+		Id         uuid.UUID `json:"id"`
+		Created_at time.Time `json:"created_at"`
+		Updated_at time.Time `json:"updated_at"`
+		Body       string    `json:"body"`
+		User_id    uuid.UUID `json:"user_id"`
+	}
+	var returning []returnjason
+	for _, chirp := range chirps {
+		daJsonMan := returnjason{
+			Id:         chirp.ID,
+			Created_at: chirp.CreatedAt,
+			Updated_at: chirp.UpdatedAt,
+			Body:       chirp.Body,
+			User_id:    chirp.UserID,
+		}
+		returning = append(returning, daJsonMan)
+	}
+	respondWithJSON(writer, 200, returning)
+}
+
+func (cfg *apiConfig) chirps(writer http.ResponseWriter, request *http.Request) {
 	type parameters struct {
-		Chirp string `json:"body"`
-		ID    string `json:"user_id"`
+		Chirp string    `json:"body"`
+		ID    uuid.UUID `json:"user_id"`
 	}
 
 	decoder := json.NewDecoder(request.Body)
@@ -73,8 +101,30 @@ func chirps(writer http.ResponseWriter, request *http.Request) {
 		respondWithError(writer, 400, "something went wrong")
 
 	}
+	chirpParams := database.CreateChirpParams{
+		Body:   validated_Chirp,
+		UserID: params.ID,
+	}
+	chirp, err := cfg.Queries.CreateChirp(request.Context(), chirpParams)
+	if err != nil {
+		respondWithError(writer, 400, "something went wrong")
 
-	fmt.Println(validated_Chirp)
+	}
+	type returnjason struct {
+		Id         uuid.UUID `json:"id"`
+		Created_at time.Time `json:"created_at"`
+		Updated_at time.Time `json:"updated_at"`
+		Body       string    `json:"body"`
+		User_id    uuid.UUID `json:"user_id"`
+	}
+	returning := returnjason{
+		Id:         chirp.ID,
+		Created_at: chirp.CreatedAt,
+		Updated_at: chirp.UpdatedAt,
+		Body:       chirp.Body,
+		User_id:    chirp.UserID,
+	}
+	respondWithJSON(writer, 201, returning)
 
 }
 

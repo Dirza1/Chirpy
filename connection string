@@ -1,1 +1,3 @@
 psql postgres://postgres:imkerjasper@localhost:5432/chirpy
+
+go build -o out && ./out
