@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Dirza1/Chirpy/internal/auth"
 	"github.com/Dirza1/Chirpy/internal/database"
 	"github.com/google/uuid"
 	"github.com/joho/godotenv"
@@ -43,6 +44,7 @@ func main() {
 	mux.HandleFunc("GET /api/healthz", healthz)
 	mux.HandleFunc("GET /admin/metrics", apiCfg.metrics)
 	mux.HandleFunc("GET /api/chirps", apiCfg.get_chirps)
+	mux.HandleFunc("GET /api/chirps/{chirpID}", apiCfg.get_chirpsID)
 	mux.HandleFunc("POST /admin/reset", apiCfg.reset)
 	mux.HandleFunc("POST /api/chirps", apiCfg.chirps)
 	mux.HandleFunc("POST /api/users", apiCfg.add_user)
@@ -58,10 +60,40 @@ func healthz(writer http.ResponseWriter, request *http.Request) {
 	writer.Write(text)
 }
 
+func (cfg *apiConfig) get_chirpsID(writer http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("chirpID")
+	ID, err := uuid.Parse(id)
+	if err != nil {
+		respondWithError(writer, 400, "Error during ID parsing")
+		return
+	}
+	chirp, err := cfg.Queries.GetChirpFromID(context.Background(), ID)
+	if err != nil {
+		respondWithError(writer, 404, "chirp not found")
+		return
+	}
+	type returnjason struct {
+		Id         uuid.UUID `json:"id"`
+		Created_at time.Time `json:"created_at"`
+		Updated_at time.Time `json:"updated_at"`
+		Body       string    `json:"body"`
+		User_id    uuid.UUID `json:"user_id"`
+	}
+	daJsonMan := returnjason{
+		Id:         chirp.ID,
+		Created_at: chirp.CreatedAt,
+		Updated_at: chirp.UpdatedAt,
+		Body:       chirp.Body,
+		User_id:    chirp.UserID,
+	}
+	respondWithJSON(writer, 200, daJsonMan)
+}
+
 func (cfg *apiConfig) get_chirps(writer http.ResponseWriter, request *http.Request) {
 	chirps, err := cfg.Queries.GetAllChirps(context.Background())
 	if err != nil {
 		respondWithError(writer, 400, "something went wrong")
+		return
 	}
 	type returnjason struct {
 		Id         uuid.UUID `json:"id"`
@@ -173,13 +205,15 @@ func (cfg *apiConfig) middlewareMetricsInc(next http.Handler) http.Handler {
 }
 func (cfg *apiConfig) add_user(writer http.ResponseWriter, request *http.Request) {
 	type incomming struct {
-		Email string `json:"email"`
+		Email    string `json:"email"`
+		Password string `jason:"password"`
 	}
 	type User struct {
 		ID        uuid.UUID `json:"id"`
 		CreatedAt time.Time `json:"created_at"`
 		UpdatedAt time.Time `json:"updated_at"`
 		Email     string    `json:"email"`
+		Password  string    `json:"password"`
 	}
 
 	decoder := json.NewDecoder(request.Body)
@@ -189,8 +223,16 @@ func (cfg *apiConfig) add_user(writer http.ResponseWriter, request *http.Request
 		respondWithError(writer, 500, "Somthing went wrong")
 		return
 	}
-
-	DBuser, err := cfg.Queries.CreateUser(request.Context(), inc.Email)
+	hashed_password, err := auth.HashPassword(inc.Password)
+	if err != nil {
+		respondWithError(writer, 500, "Something went wrong during password hash")
+	}
+	inc.Password = hashed_password
+	userss := database.CreateUserParams{
+		Email:          inc.Email,
+		HashedPassword: inc.Password,
+	}
+	DBuser, err := cfg.Queries.CreateUser(request.Context(), userss)
 	if err != nil {
 		respondWithError(writer, 400, "something went wrong with creation of user")
 		return
