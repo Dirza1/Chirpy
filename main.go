@@ -48,6 +48,7 @@ func main() {
 	mux.HandleFunc("POST /admin/reset", apiCfg.reset)
 	mux.HandleFunc("POST /api/chirps", apiCfg.chirps)
 	mux.HandleFunc("POST /api/users", apiCfg.add_user)
+	mux.HandleFunc("POST /api/login", apiCfg.login)
 
 	log.Fatal(srv.ListenAndServe())
 
@@ -58,6 +59,43 @@ func healthz(writer http.ResponseWriter, request *http.Request) {
 	writer.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	writer.WriteHeader(200)
 	writer.Write(text)
+}
+
+func (cfg *apiConfig) login(writer http.ResponseWriter, request *http.Request) {
+	type incomming struct {
+		Password string
+		Email    string
+	}
+	decorder := json.NewDecoder(request.Body)
+	incom := incomming{}
+	err := decorder.Decode(&incom)
+	if err != nil {
+		respondWithError(writer, 400, "something went wrong decoding the request")
+		return
+	}
+	user, err := cfg.Queries.ReturnUserByEmail(request.Context(), incom.Email)
+	if err != nil {
+		respondWithError(writer, 401, "incorrect email")
+		return
+	}
+	err = auth.CheckPasswordHash(incom.Password, user.HashedPassword)
+	if err != nil {
+		respondWithError(writer, 401, "incorrect password")
+		return
+	}
+	type User struct {
+		Id          uuid.UUID `json:"id"`
+		Created_at  time.Time `json:"created_at"`
+		Updaated_at time.Time `json:"updated_at"`
+		Email       string    `json:"email"`
+	}
+	returnJson := User{
+		Id:          user.ID,
+		Created_at:  user.CreatedAt,
+		Updaated_at: user.UpdatedAt,
+		Email:       user.Email,
+	}
+	respondWithJSON(writer, 200, returnJson)
 }
 
 func (cfg *apiConfig) get_chirpsID(writer http.ResponseWriter, request *http.Request) {

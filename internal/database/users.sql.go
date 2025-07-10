@@ -47,3 +47,21 @@ func (q *Queries) ResetUserDatabase(ctx context.Context) error {
 	_, err := q.db.ExecContext(ctx, resetUserDatabase)
 	return err
 }
+
+const returnUserByEmail = `-- name: ReturnUserByEmail :one
+SELECT id, created_at, updated_at, email, hashed_password from users
+WHERE email = $1
+`
+
+func (q *Queries) ReturnUserByEmail(ctx context.Context, email string) (User, error) {
+	row := q.db.QueryRowContext(ctx, returnUserByEmail, email)
+	var i User
+	err := row.Scan(
+		&i.ID,
+		&i.CreatedAt,
+		&i.UpdatedAt,
+		&i.Email,
+		&i.HashedPassword,
+	)
+	return i, err
+}
