@@ -9,5 +9,5 @@ VALUES (
 RETURNING *;
 
 
--- name: ResetDatabase :exec
+-- name: ResetUserDatabase :exec
 DELETE FROM users *;

@@ -67,13 +67,13 @@ func chirps(writer http.ResponseWriter, request *http.Request) {
 	err := decoder.Decode(&params)
 	if err != nil {
 		respondWithError(writer, 400, "something went wrong")
-
 	}
 	validated_Chirp, err := validate_chirp(params.Chirp)
 	if err != nil {
 		respondWithError(writer, 400, "something went wrong")
 
 	}
+
 	fmt.Println(validated_Chirp)
 
 }
@@ -104,7 +104,7 @@ func (cfg *apiConfig) reset(writer http.ResponseWriter, request *http.Request) {
 		respondWithError(writer, 403, "Forbidden")
 		return
 	}
-	err := cfg.Queries.ResetDatabase(request.Context())
+	err := cfg.Queries.ResetUserDatabase(request.Context())
 	if err != nil {
 		respondWithError(writer, 400, "Issue during database reset")
 		return
