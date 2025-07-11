@@ -31,11 +31,11 @@ func CheckPasswordHash(password, hash string) error {
 
 func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (string, error) {
 	stringID := userID.String()
-	token := jwt.NewWithClaims(jwt.SigningMethodES256, jwt.RegisteredClaims{Issuer: "chirpy",
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.RegisteredClaims{Issuer: "chirpy",
 		IssuedAt:  jwt.NewNumericDate(time.Now()),
 		ExpiresAt: jwt.NewNumericDate(time.Now().Add(expiresIn)),
 		Subject:   stringID})
-	signedToken, err := token.SignedString(token)
+	signedToken, err := token.SignedString([]byte(tokenSecret))
 	if err != nil {
 		return "", err
 	}
@@ -43,5 +43,21 @@ func MakeJWT(userID uuid.UUID, tokenSecret string, expiresIn time.Duration) (str
 }
 
 func ValidateJWT(tokenString, tokenSecret string) (uuid.UUID, error) {
-	return uuid.Nil, nil
+	claims := jwt.RegisteredClaims{}
+
+	_, err := jwt.ParseWithClaims(tokenString, &claims, func(token *jwt.Token) (interface{}, error) {
+		return []byte(tokenSecret), nil
+	})
+	if err != nil {
+		return uuid.Nil, err
+	}
+	id, err := claims.GetSubject()
+	if err != nil {
+		return uuid.Nil, err
+	}
+	parsedId, err := uuid.Parse(id)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return parsedId, nil
 }
