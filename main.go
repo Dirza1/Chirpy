@@ -25,6 +25,7 @@ func main() {
 	godotenv.Load(".env")
 	dbURL := os.Getenv("DB_URL")
 	platform := os.Getenv("PLATFORM")
+	secretToken := os.Getenv("TOKEN")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Println("error opening database")
@@ -34,6 +35,7 @@ func main() {
 	apiCfg := apiConfig{}
 	apiCfg.Queries = database.New(db)
 	apiCfg.PLATFORM = platform
+	apiCfg.SecretToken = secretToken
 	mux := http.ServeMux{}
 	mux.Handle("/app/", http.StripPrefix("/app", apiCfg.middlewareMetricsInc(http.FileServer(http.Dir(".")))))
 	srv := &http.Server{
@@ -63,8 +65,9 @@ func healthz(writer http.ResponseWriter, request *http.Request) {
 
 func (cfg *apiConfig) login(writer http.ResponseWriter, request *http.Request) {
 	type incomming struct {
-		Password string
-		Email    string
+		Password         string `json:"password"`
+		Email            string `json:"email"`
+		ExpiresInSeconds int    `json:"expires_in_seconds"`
 	}
 	decorder := json.NewDecoder(request.Body)
 	incom := incomming{}
@@ -72,6 +75,9 @@ func (cfg *apiConfig) login(writer http.ResponseWriter, request *http.Request) {
 	if err != nil {
 		respondWithError(writer, 400, "something went wrong decoding the request")
 		return
+	}
+	if incom.ExpiresInSeconds == 0 || incom.ExpiresInSeconds > 3600 {
+		incom.ExpiresInSeconds = 3600
 	}
 	user, err := cfg.Queries.ReturnUserByEmail(request.Context(), incom.Email)
 	if err != nil {
@@ -83,19 +89,28 @@ func (cfg *apiConfig) login(writer http.ResponseWriter, request *http.Request) {
 		respondWithError(writer, 401, "incorrect password")
 		return
 	}
+	expiresIn := time.Duration(incom.ExpiresInSeconds) * time.Second
+	token, err := auth.MakeJWT(user.ID, cfg.SecretToken, expiresIn)
+	if err != nil {
+		respondWithError(writer, 401, "error during token generation")
+		return
+	}
 	type User struct {
-		Id          uuid.UUID `json:"id"`
-		Created_at  time.Time `json:"created_at"`
-		Updaated_at time.Time `json:"updated_at"`
-		Email       string    `json:"email"`
+		Id         uuid.UUID `json:"id"`
+		Created_at time.Time `json:"created_at"`
+		Updated_at time.Time `json:"updated_at"`
+		Email      string    `json:"email"`
+		Token      string    `json:"token"`
 	}
 	returnJson := User{
-		Id:          user.ID,
-		Created_at:  user.CreatedAt,
-		Updaated_at: user.UpdatedAt,
-		Email:       user.Email,
+		Id:         user.ID,
+		Created_at: user.CreatedAt,
+		Updated_at: user.UpdatedAt,
+		Email:      user.Email,
+		Token:      token,
 	}
 	respondWithJSON(writer, 200, returnJson)
+
 }
 
 func (cfg *apiConfig) get_chirpsID(writer http.ResponseWriter, request *http.Request) {
@@ -156,13 +171,19 @@ func (cfg *apiConfig) get_chirps(writer http.ResponseWriter, request *http.Reque
 
 func (cfg *apiConfig) chirps(writer http.ResponseWriter, request *http.Request) {
 	type parameters struct {
-		Chirp string    `json:"body"`
-		ID    uuid.UUID `json:"user_id"`
+		Chirp string `json:"body"`
 	}
-
+	token, err := auth.GetBearerToken(request.Header)
+	if err != nil {
+		respondWithError(writer, 401, "incorrect or missing login token")
+	}
+	userID, err := auth.ValidateJWT(token, cfg.SecretToken)
+	if err != nil {
+		respondWithError(writer, 401, "unknown user")
+	}
 	decoder := json.NewDecoder(request.Body)
 	params := parameters{}
-	err := decoder.Decode(&params)
+	err = decoder.Decode(&params)
 	if err != nil {
 		respondWithError(writer, 400, "something went wrong")
 	}
@@ -173,7 +194,7 @@ func (cfg *apiConfig) chirps(writer http.ResponseWriter, request *http.Request) 
 	}
 	chirpParams := database.CreateChirpParams{
 		Body:   validated_Chirp,
-		UserID: params.ID,
+		UserID: userID,
 	}
 	chirp, err := cfg.Queries.CreateChirp(request.Context(), chirpParams)
 	if err != nil {
@@ -264,6 +285,7 @@ func (cfg *apiConfig) add_user(writer http.ResponseWriter, request *http.Request
 	hashed_password, err := auth.HashPassword(inc.Password)
 	if err != nil {
 		respondWithError(writer, 500, "Something went wrong during password hash")
+		return
 	}
 	inc.Password = hashed_password
 	userss := database.CreateUserParams{
@@ -289,6 +311,7 @@ type apiConfig struct {
 	fileserverHits atomic.Int32
 	Queries        *database.Queries
 	PLATFORM       string
+	SecretToken    string
 }
 
 func respondWithError(w http.ResponseWriter, code int, msg string) {
