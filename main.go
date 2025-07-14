@@ -65,9 +65,8 @@ func healthz(writer http.ResponseWriter, request *http.Request) {
 
 func (cfg *apiConfig) login(writer http.ResponseWriter, request *http.Request) {
 	type incomming struct {
-		Password         string `json:"password"`
-		Email            string `json:"email"`
-		ExpiresInSeconds int    `json:"expires_in_seconds"`
+		Password string `json:"password"`
+		Email    string `json:"email"`
 	}
 	decorder := json.NewDecoder(request.Body)
 	incom := incomming{}
@@ -75,9 +74,6 @@ func (cfg *apiConfig) login(writer http.ResponseWriter, request *http.Request) {
 	if err != nil {
 		respondWithError(writer, 400, "something went wrong decoding the request")
 		return
-	}
-	if incom.ExpiresInSeconds == 0 || incom.ExpiresInSeconds > 3600 {
-		incom.ExpiresInSeconds = 3600
 	}
 	user, err := cfg.Queries.ReturnUserByEmail(request.Context(), incom.Email)
 	if err != nil {
@@ -89,10 +85,23 @@ func (cfg *apiConfig) login(writer http.ResponseWriter, request *http.Request) {
 		respondWithError(writer, 401, "incorrect password")
 		return
 	}
-	expiresIn := time.Duration(incom.ExpiresInSeconds) * time.Second
-	token, err := auth.MakeJWT(user.ID, cfg.SecretToken, expiresIn)
+	Authtoken, err := auth.MakeJWT(user.ID, cfg.SecretToken, 1*time.Hour)
 	if err != nil {
-		respondWithError(writer, 401, "error during token generation")
+		respondWithError(writer, 401, "error during auth token generation")
+		return
+	}
+	randomToken, err := auth.MakeRefreshToken()
+	if err != nil {
+		respondWithError(writer, 401, "error during refresh token generation")
+		return
+	}
+	refreshparams := database.GenerateRefreshTokenParams{
+		Token:  randomToken,
+		UserID: user.ID,
+	}
+	Refreshtoken, err := cfg.Queries.GenerateRefreshToken(request.Context(), refreshparams)
+	if err != nil {
+		respondWithError(writer, 401, "error during refresh token insertion")
 		return
 	}
 	type User struct {
@@ -100,14 +109,16 @@ func (cfg *apiConfig) login(writer http.ResponseWriter, request *http.Request) {
 		Created_at time.Time `json:"created_at"`
 		Updated_at time.Time `json:"updated_at"`
 		Email      string    `json:"email"`
-		Token      string    `json:"token"`
+		AuthToken  string    `json:"token"`
+		RefTroken  string    `jason:"refresh_token"`
 	}
 	returnJson := User{
 		Id:         user.ID,
 		Created_at: user.CreatedAt,
 		Updated_at: user.UpdatedAt,
 		Email:      user.Email,
-		Token:      token,
+		AuthToken:  Authtoken,
+		RefTroken:  Refreshtoken.Token,
 	}
 	respondWithJSON(writer, 200, returnJson)
 
