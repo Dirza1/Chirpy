@@ -51,9 +51,58 @@ func main() {
 	mux.HandleFunc("POST /api/chirps", apiCfg.chirps)
 	mux.HandleFunc("POST /api/users", apiCfg.add_user)
 	mux.HandleFunc("POST /api/login", apiCfg.login)
+	mux.HandleFunc("POST /api/refresh", apiCfg.refresh)
+	mux.HandleFunc("POST /api/revoke", apiCfg.revoke)
 
 	log.Fatal(srv.ListenAndServe())
 
+}
+
+func (cfg *apiConfig) revoke(writer http.ResponseWriter, request *http.Request) {
+	refreshToken, err := auth.GetBearerToken(request.Header)
+	if err != nil {
+		respondWithError(writer, 400, "error gathering the reforesh token")
+		return
+	}
+	err = cfg.Queries.RevokeRefreshToken(request.Context(), refreshToken)
+	if err != nil {
+		respondWithError(writer, 400, "error grevoking token")
+		return
+	}
+	respondWithJSON(writer, 204, nil)
+}
+
+func (cfg *apiConfig) refresh(writer http.ResponseWriter, request *http.Request) {
+	refreshToken, err := auth.GetBearerToken(request.Header)
+	if err != nil {
+		respondWithError(writer, 401, "error durig retrieval of the refresh token")
+		return
+	}
+	user, err := cfg.Queries.GetUserFromRefreshToken(request.Context(), refreshToken)
+	if err != nil {
+		respondWithError(writer, 401, "error durig retrieval of the user")
+		return
+	}
+	if user.RevokedAt.Valid {
+		respondWithError(writer, 401, "refresh token expired")
+		return
+	}
+	if user.ExpiresAt.Before(time.Now()) {
+		respondWithError(writer, 401, "Refresh token exipred")
+		return
+	}
+	type ReturnStruct struct {
+		Token string `json:"token"`
+	}
+	NewToken, err := auth.MakeJWT(user.UserID, cfg.SecretToken, 1*time.Hour)
+	if err != nil {
+		respondWithError(writer, 401, "Error during token generation")
+		return
+	}
+	Returning := ReturnStruct{
+		Token: NewToken,
+	}
+	respondWithJSON(writer, 200, Returning)
 }
 
 func healthz(writer http.ResponseWriter, request *http.Request) {
@@ -110,7 +159,7 @@ func (cfg *apiConfig) login(writer http.ResponseWriter, request *http.Request) {
 		Updated_at time.Time `json:"updated_at"`
 		Email      string    `json:"email"`
 		AuthToken  string    `json:"token"`
-		RefTroken  string    `jason:"refresh_token"`
+		RefTroken  string    `json:"refresh_token"`
 	}
 	returnJson := User{
 		Id:         user.ID,
@@ -187,16 +236,19 @@ func (cfg *apiConfig) chirps(writer http.ResponseWriter, request *http.Request) 
 	token, err := auth.GetBearerToken(request.Header)
 	if err != nil {
 		respondWithError(writer, 401, "incorrect or missing login token")
+		return
 	}
 	userID, err := auth.ValidateJWT(token, cfg.SecretToken)
 	if err != nil {
 		respondWithError(writer, 401, "unknown user")
+		return
 	}
 	decoder := json.NewDecoder(request.Body)
 	params := parameters{}
 	err = decoder.Decode(&params)
 	if err != nil {
 		respondWithError(writer, 400, "something went wrong")
+		return
 	}
 	validated_Chirp, err := validate_chirp(params.Chirp)
 	if err != nil {
