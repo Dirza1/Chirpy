@@ -53,60 +53,45 @@ func main() {
 	mux.HandleFunc("POST /api/login", apiCfg.login)
 	mux.HandleFunc("POST /api/refresh", apiCfg.refresh)
 	mux.HandleFunc("POST /api/revoke", apiCfg.revoke)
-	mux.HandleFunc("PUT /api/users", apiCfg.update_user)
+	mux.HandleFunc("DELETE /api/chirps/{chirpID}", apiCfg.delete_chirps)
 
 	log.Fatal(srv.ListenAndServe())
 
 }
 
-func (cfg *apiConfig) update_user(writer http.ResponseWriter, request *http.Request) {
+func (cfg *apiConfig) delete_chirps(writer http.ResponseWriter, request *http.Request) {
+	id := request.PathValue("chirpID")
+	uuidID, err := uuid.Parse(id)
+	if err != nil {
+		respondWithError(writer, 401, "error during chirp IDD parsing")
+		return
+	}
+	chirpStruct, err := cfg.Queries.GetChirpFromID(request.Context(), uuidID)
+	if err != nil {
+		respondWithError(writer, 401, "error retrieving chirp from database")
+		return
+	}
+	token, err := auth.GetBearerToken(request.Header)
+	if err != nil {
+		respondWithError(writer, 401, "error during token retrieval")
+		return
+	}
+	userID, err := auth.ValidateJWT(token, cfg.SecretToken)
+	if err != nil {
+		respondWithError(writer, 401, "error validating token")
+		return
+	}
+	if userID != chirpStruct.UserID {
+		respondWithError(writer, 403, "dedlete not authorised")
+		return
+	}
 
-	accessToken, err := auth.GetBearerToken(request.Header)
+	err = cfg.Queries.DeleteChirp(request.Context(), chirpStruct.ID)
 	if err != nil {
-		respondWithError(writer, 401, "errord during gathering of access token.")
+		respondWithError(writer, 404, "Chirp not found")
 		return
 	}
-	relatedUser, err := auth.ValidateJWT(accessToken, cfg.SecretToken)
-	if err != nil {
-		respondWithError(writer, 401, "errord during gathering of related user.")
-		return
-	}
-	type recievedJson struct {
-		Email    string `json:"email"`
-		Password string `json:"password"`
-	}
-	recieving := recievedJson{}
-	decorder := json.NewDecoder(request.Body)
-	err = decorder.Decode(&recieving)
-	if err != nil {
-		respondWithError(writer, 401, "error decoding incomming json")
-		return
-	}
-	paswordHash, err := auth.HashPassword(recieving.Password)
-	if err != nil {
-		respondWithError(writer, 401, "error during password hashen")
-		return
-	}
-	UpdatedUser := database.UpdateUserDataParams{
-		Email:          recieving.Email,
-		HashedPassword: paswordHash,
-		ID:             relatedUser,
-	}
-	newUser, err := cfg.Queries.UpdateUserData(request.Context(), UpdatedUser)
-	if err != nil {
-		respondWithError(writer, 401, "error during user update")
-		return
-	}
-	type returingUser struct {
-		ID    uuid.UUID `json:"id"`
-		Email string    `json:"email"`
-	}
-	toReturn := returingUser{
-		ID:    newUser.ID,
-		Email: newUser.Email,
-	}
-	respondWithJSON(writer, 200, toReturn)
-
+	respondWithJSON(writer, 204, nil)
 }
 
 func (cfg *apiConfig) revoke(writer http.ResponseWriter, request *http.Request) {
