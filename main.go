@@ -53,8 +53,59 @@ func main() {
 	mux.HandleFunc("POST /api/login", apiCfg.login)
 	mux.HandleFunc("POST /api/refresh", apiCfg.refresh)
 	mux.HandleFunc("POST /api/revoke", apiCfg.revoke)
+	mux.HandleFunc("PUT /api/users", apiCfg.update_user)
 
 	log.Fatal(srv.ListenAndServe())
+
+}
+
+func (cfg *apiConfig) update_user(writer http.ResponseWriter, request *http.Request) {
+
+	accessToken, err := auth.GetBearerToken(request.Header)
+	if err != nil {
+		respondWithError(writer, 401, "errord during gathering of access token.")
+		return
+	}
+	relatedUser, err := auth.ValidateJWT(accessToken, cfg.SecretToken)
+	if err != nil {
+		respondWithError(writer, 401, "errord during gathering of related user.")
+		return
+	}
+	type recievedJson struct {
+		Email    string `json:"email"`
+		Password string `json:"password"`
+	}
+	recieving := recievedJson{}
+	decorder := json.NewDecoder(request.Body)
+	err = decorder.Decode(&recieving)
+	if err != nil {
+		respondWithError(writer, 401, "error decoding incomming json")
+		return
+	}
+	paswordHash, err := auth.HashPassword(recieving.Password)
+	if err != nil {
+		respondWithError(writer, 401, "error during password hashen")
+		return
+	}
+	UpdatedUser := database.UpdateUserDataParams{
+		Email:          recieving.Email,
+		HashedPassword: paswordHash,
+		ID:             relatedUser,
+	}
+	newUser, err := cfg.Queries.UpdateUserData(request.Context(), UpdatedUser)
+	if err != nil {
+		respondWithError(writer, 401, "error during user update")
+		return
+	}
+	type returingUser struct {
+		ID    uuid.UUID `json:"id"`
+		Email string    `json:"email"`
+	}
+	toReturn := returingUser{
+		ID:    newUser.ID,
+		Email: newUser.Email,
+	}
+	respondWithJSON(writer, 200, toReturn)
 
 }
 
