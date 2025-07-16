@@ -91,3 +91,18 @@ func MakeRefreshToken() (string, error) {
 	hexstring := hex.EncodeToString(randomData)
 	return hexstring, nil
 }
+
+func GetAPIKey(headers http.Header) (string, error) {
+	authorisationHeader := headers.Get("Authorization")
+	if authorisationHeader == "" {
+		return "", errors.New("no token avalible")
+	}
+	sliceHeader := strings.Split(authorisationHeader, " ")
+	if len(sliceHeader) != 2 {
+		return "", errors.New("incorrect format of authorisation header")
+	}
+	if strings.ToLower(sliceHeader[0]) != "apikey" {
+		return "", errors.New("bearer prefix not found")
+	}
+	return sliceHeader[1], nil
+}

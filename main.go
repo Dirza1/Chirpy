@@ -26,6 +26,7 @@ func main() {
 	dbURL := os.Getenv("DB_URL")
 	platform := os.Getenv("PLATFORM")
 	secretToken := os.Getenv("TOKEN")
+	pokaKey := os.Getenv("POLKA_KEY")
 	db, err := sql.Open("postgres", dbURL)
 	if err != nil {
 		log.Println("error opening database")
@@ -36,6 +37,7 @@ func main() {
 	apiCfg.Queries = database.New(db)
 	apiCfg.PLATFORM = platform
 	apiCfg.SecretToken = secretToken
+	apiCfg.PolkaKKey = pokaKey
 	mux := http.ServeMux{}
 	mux.Handle("/app/", http.StripPrefix("/app", apiCfg.middlewareMetricsInc(http.FileServer(http.Dir(".")))))
 	srv := &http.Server{
@@ -68,9 +70,18 @@ func (cfg *apiConfig) upgrade_user(writer http.ResponseWriter, request *http.Req
 		Event string     `json:"event"`
 		Data  useridjson `json:"data"`
 	}
+	recievedApiKey, err := auth.GetAPIKey(request.Header)
+	if err != nil {
+		respondWithError(writer, 401, "error retrieving the key")
+		return
+	}
+	if recievedApiKey != cfg.PolkaKKey {
+		respondWithError(writer, 401, "Incorrect API key")
+		return
+	}
 	decoder := json.NewDecoder(request.Body)
 	inc := incomming{}
-	err := decoder.Decode(&inc)
+	err = decoder.Decode(&inc)
 	if err != nil {
 		respondWithError(writer, 404, "error decoding the incomming json")
 		return
@@ -276,10 +287,22 @@ func (cfg *apiConfig) get_chirpsID(writer http.ResponseWriter, request *http.Req
 }
 
 func (cfg *apiConfig) get_chirps(writer http.ResponseWriter, request *http.Request) {
-	chirps, err := cfg.Queries.GetAllChirps(context.Background())
-	if err != nil {
-		respondWithError(writer, 400, "something went wrong")
-		return
+	var chirps []database.Chirp
+	var err error
+	authorID := request.URL.Query().Get("author_id")
+	id, _ := uuid.Parse(authorID)
+	sortType := request.URL.Query().Get("sort")
+	if authorID != "" {
+		chirps, err = cfg.Queries.GetChirpsFromAuthor(request.Context(), id)
+		if err != nil {
+			respondWithError(writer, 401, "error recieving chirps")
+		}
+	} else {
+		chirps, err = cfg.Queries.GetAllChirps(context.Background())
+		if err != nil {
+			respondWithError(writer, 400, "something went wrong")
+			return
+		}
 	}
 	type returnjason struct {
 		Id         uuid.UUID `json:"id"`
@@ -289,6 +312,9 @@ func (cfg *apiConfig) get_chirps(writer http.ResponseWriter, request *http.Reque
 		User_id    uuid.UUID `json:"user_id"`
 	}
 	var returning []returnjason
+	if sortType == "desc" {
+		slices.Reverse(chirps)
+	}
 	for _, chirp := range chirps {
 		daJsonMan := returnjason{
 			Id:         chirp.ID,
@@ -450,6 +476,7 @@ type apiConfig struct {
 	Queries        *database.Queries
 	PLATFORM       string
 	SecretToken    string
+	PolkaKKey      string
 }
 
 func respondWithError(w http.ResponseWriter, code int, msg string) {
