@@ -53,9 +53,44 @@ func main() {
 	mux.HandleFunc("POST /api/login", apiCfg.login)
 	mux.HandleFunc("POST /api/refresh", apiCfg.refresh)
 	mux.HandleFunc("POST /api/revoke", apiCfg.revoke)
+	mux.HandleFunc("POST /api/polka/webhooks", apiCfg.upgrade_user)
 	mux.HandleFunc("DELETE /api/chirps/{chirpID}", apiCfg.delete_chirps)
 
 	log.Fatal(srv.ListenAndServe())
+
+}
+
+func (cfg *apiConfig) upgrade_user(writer http.ResponseWriter, request *http.Request) {
+	type useridjson struct {
+		UserId uuid.UUID `json:"user_id"`
+	}
+	type incomming struct {
+		Event string     `json:"event"`
+		Data  useridjson `json:"data"`
+	}
+	decoder := json.NewDecoder(request.Body)
+	inc := incomming{}
+	err := decoder.Decode(&inc)
+	if err != nil {
+		respondWithError(writer, 404, "error decoding the incomming json")
+		return
+	}
+	if inc.Event != "user.upgraded" {
+		respondWithJSON(writer, 204, nil)
+		return
+	}
+	err = cfg.Queries.UpgrateToChirpyRed(request.Context(), inc.Data.UserId)
+	if err != nil {
+		respondWithError(writer, 404, "error upgrading user")
+		return
+	}
+	type returnstruct struct {
+		Body string `json:"body"`
+	}
+	returning := returnstruct{
+		Body: "",
+	}
+	respondWithJSON(writer, 204, returning)
 
 }
 
@@ -190,20 +225,22 @@ func (cfg *apiConfig) login(writer http.ResponseWriter, request *http.Request) {
 		return
 	}
 	type User struct {
-		Id         uuid.UUID `json:"id"`
-		Created_at time.Time `json:"created_at"`
-		Updated_at time.Time `json:"updated_at"`
-		Email      string    `json:"email"`
-		AuthToken  string    `json:"token"`
-		RefTroken  string    `json:"refresh_token"`
+		Id          uuid.UUID `json:"id"`
+		Created_at  time.Time `json:"created_at"`
+		Updated_at  time.Time `json:"updated_at"`
+		Email       string    `json:"email"`
+		AuthToken   string    `json:"token"`
+		RefTroken   string    `json:"refresh_token"`
+		IsChirpyRed bool      `json:"is_chirpy_red"`
 	}
 	returnJson := User{
-		Id:         user.ID,
-		Created_at: user.CreatedAt,
-		Updated_at: user.UpdatedAt,
-		Email:      user.Email,
-		AuthToken:  Authtoken,
-		RefTroken:  Refreshtoken.Token,
+		Id:          user.ID,
+		Created_at:  user.CreatedAt,
+		Updated_at:  user.UpdatedAt,
+		Email:       user.Email,
+		AuthToken:   Authtoken,
+		RefTroken:   Refreshtoken.Token,
+		IsChirpyRed: user.IsChirpyRed,
 	}
 	respondWithJSON(writer, 200, returnJson)
 
@@ -367,11 +404,12 @@ func (cfg *apiConfig) add_user(writer http.ResponseWriter, request *http.Request
 		Password string `jason:"password"`
 	}
 	type User struct {
-		ID        uuid.UUID `json:"id"`
-		CreatedAt time.Time `json:"created_at"`
-		UpdatedAt time.Time `json:"updated_at"`
-		Email     string    `json:"email"`
-		Password  string    `json:"password"`
+		ID          uuid.UUID `json:"id"`
+		CreatedAt   time.Time `json:"created_at"`
+		UpdatedAt   time.Time `json:"updated_at"`
+		Email       string    `json:"email"`
+		Password    string    `json:"password"`
+		IsChirpyRed bool      `json:"is_chirpy_red"`
 	}
 
 	decoder := json.NewDecoder(request.Body)
@@ -397,10 +435,11 @@ func (cfg *apiConfig) add_user(writer http.ResponseWriter, request *http.Request
 		return
 	}
 	user := User{
-		ID:        DBuser.ID,
-		CreatedAt: DBuser.CreatedAt,
-		UpdatedAt: DBuser.UpdatedAt,
-		Email:     DBuser.Email,
+		ID:          DBuser.ID,
+		CreatedAt:   DBuser.CreatedAt,
+		UpdatedAt:   DBuser.UpdatedAt,
+		Email:       DBuser.Email,
+		IsChirpyRed: DBuser.IsChirpyRed,
 	}
 	respondWithJSON(writer, 201, user)
 
